@@ -61,7 +61,7 @@ pub(crate) enum Stmt {
     Try(Vec<Stmt>, Vec<(Vec<String>, Option<String>, Vec<Stmt>)>),
     Raise(Expr),
     Import(String),
-    FromImport(String, Vec<String>),
+    FromImport(String, Vec<String>, usize),
     Return(Option<Expr>),
     Break,
     Continue,

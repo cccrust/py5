@@ -20,6 +20,8 @@ pub fn run_file(path: &str) {
     eval::install_builtins(&globals);
     let mut rt = eval::Runtime {
         sys_modules: HashMap::new(),
+        current_package: None,
+        current_module_dir: None,
     };
 
     if let Some(sys_mod) = natives::load_native_module("sys") {

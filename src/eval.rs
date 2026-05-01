@@ -5,10 +5,13 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fs;
 use std::io::{Read, Write};
+use std::path::Path;
 use std::rc::Rc;
 
 pub(crate) struct Runtime {
     pub sys_modules: HashMap<String, PyValue>,
+    pub current_package: Option<String>,
+    pub current_module_dir: Option<String>,
 }
 pub(crate) enum ExecStatus {
     Continue,
@@ -18,20 +21,42 @@ pub(crate) enum ExecStatus {
 }
 
 pub(crate) fn load_module(rt: &mut Runtime, name: &str) -> Result<PyValue, PyValue> {
-    if let Some(m) = rt.sys_modules.get(name) {
+    load_module_internal(rt, name, 0)
+}
+
+fn load_module_internal(rt: &mut Runtime, name: &str, level: usize) -> Result<PyValue, PyValue> {
+    let full_name = if level > 0 {
+        if let Some(ref pkg) = rt.current_package {
+            let parts: Vec<&str> = pkg.split('.').collect();
+            if level > parts.len() {
+                return py_err("ImportError", "attempted relative import with no parent package");
+            }
+            let base_path = parts[..parts.len() - level].join(".");
+            if name.is_empty() {
+                base_path
+            } else {
+                format!("{}.{}", base_path, name)
+            }
+        } else {
+            return py_err("ImportError", "relative import without a package");
+        }
+    } else {
+        name.to_string()
+    };
+
+    if let Some(m) = rt.sys_modules.get(&full_name) {
         return Ok(m.clone());
     }
 
-    if let Some(native_module) = natives::load_native_module(name) {
+    if let Some(native_module) = natives::load_native_module(&full_name) {
         rt.sys_modules
-            .insert(name.to_string(), native_module.clone());
+            .insert(full_name.clone(), native_module.clone());
         return Ok(native_module);
     }
 
     let mut search_paths = vec![".".to_string()];
     if let Some(PyValue::Module(_, sys_env)) = rt.sys_modules.get("sys") {
         if let Ok(PyValue::List(l)) = sys_env.borrow().get("path") {
-            search_paths.clear();
             for item in l.borrow().iter() {
                 if let PyValue::Str(s) = item {
                     search_paths.push(s.clone());
@@ -40,29 +65,25 @@ pub(crate) fn load_module(rt: &mut Runtime, name: &str) -> Result<PyValue, PyVal
         }
     }
 
-    let path_base = name.replace('.', "/");
+    if let Some(ref mod_dir) = rt.current_module_dir {
+        search_paths.insert(0, mod_dir.clone());
+    }
+
+    let path_base = full_name.replace('.', "/");
     let mut found_src = None;
     let mut found_path = String::new();
 
-    for base in search_paths {
-        let file_path = if base.is_empty() {
-            format!("{}.py", path_base)
-        } else {
-            format!("{}/{}.py", base, path_base)
-        };
-        let pkg_path = if base.is_empty() {
-            format!("{}/__init__.py", path_base)
-        } else {
-            format!("{}/{}/__init__.py", base, path_base)
-        };
+    for base in &search_paths {
+        let file_path = format!("{}/{}.py", base, path_base);
+        let pkg_init_path = format!("{}/{}/__init__.py", base, path_base);
 
         if let Ok(s) = fs::read_to_string(&file_path) {
             found_src = Some(s);
             found_path = file_path;
             break;
-        } else if let Ok(s) = fs::read_to_string(&pkg_path) {
+        } else if let Ok(s) = fs::read_to_string(&pkg_init_path) {
             found_src = Some(s);
-            found_path = pkg_path;
+            found_path = pkg_init_path;
             break;
         }
     }
@@ -70,16 +91,37 @@ pub(crate) fn load_module(rt: &mut Runtime, name: &str) -> Result<PyValue, PyVal
     let src = found_src
         .ok_or_else(|| py_err_val("ImportError", &format!("No module named '{}'", name)))?;
 
+    let found_dir = Path::new(&found_path)
+        .parent()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+
     let tokens = crate::lexer::lex_source(&src).map_err(|e| py_err_val("SyntaxError", &e))?;
     let mut parser = crate::parser::Parser::new(&tokens, &found_path);
     let ast = parser
         .parse_module()
         .map_err(|e| py_err_val("SyntaxError", &e))?;
+
+    let prev_package = rt.current_package.take();
+    let prev_dir = rt.current_module_dir.take();
+
+    let new_package = if found_path.contains("__init__.py") {
+        Some(full_name.clone())
+    } else {
+        Some(full_name.rsplit('.').next().unwrap_or(&full_name).to_string())
+    };
+    rt.current_package = new_package.clone();
+    rt.current_module_dir = Some(found_dir);
+
     let mod_env = Env::new(None);
     install_builtins(&mod_env);
     exec_block(rt, &mod_env, &ast)?;
-    let module_val = PyValue::Module(name.to_string(), mod_env);
-    rt.sys_modules.insert(name.to_string(), module_val.clone());
+
+    rt.current_package = prev_package;
+    rt.current_module_dir = prev_dir;
+
+    let module_val = PyValue::Module(full_name.clone(), mod_env);
+    rt.sys_modules.insert(full_name.clone(), module_val.clone());
     Ok(module_val)
 }
 
@@ -603,8 +645,8 @@ fn exec_stmt(
             env.borrow_mut().assign(bind_name, module);
             Ok(ExecStatus::Continue)
         }
-        Stmt::FromImport(mod_name, names) => {
-            let module = load_module(rt, mod_name)?;
+        Stmt::FromImport(mod_name, names, level) => {
+            let module = load_module_internal(rt, mod_name, *level)?;
             if let PyValue::Module(_, mod_env) = module {
                 for n in names {
                     let val = mod_env.borrow().get(n)?;

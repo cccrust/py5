@@ -72,15 +72,56 @@ pub(crate) fn lex_source(source: &str) -> Result<Vec<Token>, String> {
     let mut indent_stack = vec![0];
     let mut line_no = 1;
     let mut paren_level = 0;
+    let mut in_triple_quote: Option<char> = None;
+    let mut triple_quote_start_line = 0;
+    let mut triple_quote_content = String::new();
 
     for line in source.lines() {
         let mut col = 0;
         let mut indent = 0;
         let chars: Vec<char> = line.chars().collect();
-        while col < chars.len() && (chars[col] == ' ' || chars[col] == '\t') {
-            indent += if chars[col] == '\t' { 4 } else { 1 };
-            col += 1;
+
+        if let Some(quote) = in_triple_quote {
+            let mut i = 0;
+            let mut escaped = false;
+            while i < chars.len() {
+                if !escaped && chars[i] == quote && i + 2 < chars.len()
+                    && chars[i + 1] == quote && chars[i + 2] == quote {
+                    i += 3;
+                    in_triple_quote = None;
+                    break;
+                }
+                if !escaped && chars[i] == '\\' && i + 1 < chars.len() {
+                    escaped = true;
+                } else {
+                    escaped = false;
+                }
+                triple_quote_content.push(chars[i]);
+                eprintln!("TRACE: Push {:?}, content len={}", chars[i], triple_quote_content.len());
+                i += 1;
+            }
+            if in_triple_quote.is_some() {
+                line_no += 1;
+                continue;
+            }
+            tokens.push(Token {
+                kind: TokenKind::String(triple_quote_content.clone()),
+                line: triple_quote_start_line,
+                col: 1,
+            });
+            eprintln!("TRACE: Emit String len={} content={:?}", triple_quote_content.len(), triple_quote_content);
+            triple_quote_content.clear();
+            if i >= chars.len() {
+                line_no += 1;
+                continue;
+            }
+        } else {
+            while col < chars.len() && (chars[col] == ' ' || chars[col] == '\t') {
+                indent += if chars[col] == '\t' { 4 } else { 1 };
+                col += 1;
+            }
         }
+
         if col == chars.len() || chars[col] == '#' {
             line_no += 1;
             continue;
@@ -232,36 +273,66 @@ pub(crate) fn lex_source(source: &str) -> Result<Vec<Token>, String> {
             if c == '\'' || c == '"' {
                 let quote = c;
                 let start = i;
-                let mut val = String::new();
                 i += 1;
-                while i < chars.len() && chars[i] != quote {
-                    if chars[i] == '\\' {
-                        i += 1;
-                        if i == chars.len() {
+                let is_triple = i + 1 < chars.len() && chars[i] == quote && chars[i + 1] == quote;
+if is_triple {
+                    i += 2;
+                    in_triple_quote = Some(quote);
+                    triple_quote_start_line = line_no;
+                    triple_quote_content.clear();
+                    eprintln!("TRACE: Enter triple quote mode at line {}, i={}", line_no, i);
+                    while i < chars.len() {
+                        if in_triple_quote.is_some() && !triple_quote_content.is_empty()
+                            && chars[i] == quote && i + 2 < chars.len()
+                            && chars[i + 1] == quote && chars[i + 2] == quote {
+                            i += 3;
+                            in_triple_quote = None;
+                            tokens.push(Token {
+                                kind: TokenKind::String(triple_quote_content.clone()),
+                                line: line_no,
+                                col: start + 1,
+                            });
+                            triple_quote_content.clear();
                             break;
                         }
-                        match chars[i] {
-                            'n' => val.push('\n'),
-                            't' => val.push('\t'),
-                            '\\' => val.push('\\'),
-                            '\'' => val.push('\''),
-                            '"' => val.push('"'),
-                            _ => val.push(chars[i]),
+                        triple_quote_content.push(chars[i]);
+                        i += 1;
+                    }
+                    if in_triple_quote.is_some() {
+                        line_no += 1;
+                        continue;
+                    }
+                } else {
+                    let mut val = String::new();
+                    while i < chars.len() && chars[i] != quote {
+                        if chars[i] == '\\' {
+                            i += 1;
+                            if i == chars.len() {
+                                break;
+                            }
+                            match chars[i] {
+                                'n' => val.push('\n'),
+                                't' => val.push('\t'),
+                                '\\' => val.push('\\'),
+                                '\'' => val.push('\''),
+                                '"' => val.push('"'),
+                                _ => val.push(chars[i]),
+                            }
+                        } else {
+                            val.push(chars[i]);
                         }
-                    } else {
-                        val.push(chars[i]);
+                        i += 1;
+                    }
+                    if i == chars.len() {
+                        return Err(format!("unterminated string line {}", line_no));
                     }
                     i += 1;
+                    tokens.push(Token {
+                        kind: TokenKind::String(val),
+                        line: line_no,
+                        col: start + 1,
+                    });
                 }
-                if i == chars.len() {
-                    return Err(format!("unterminated string line {}", line_no));
-                }
-                i += 1;
-                tokens.push(Token {
-                    kind: TokenKind::String(val),
-                    line: line_no,
-                    col: start + 1,
-                });
                 continue;
             }
 

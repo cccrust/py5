@@ -4,11 +4,48 @@ use crate::parser::Parser;
 use crate::value::{py_err, py_err_val, Env, PyValue};
 use std::cell::RefCell;
 use std::env;
-use std::process::Command;
 use std::rc::Rc;
 use std::thread::sleep;
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+use std::process::Command;
+
+pub(crate) fn get_site_packages() -> Vec<String> {
+    if let Ok(output) = Command::new("python3")
+        .args(["-c", "import site; print(';'.join(site.getsitepackages()))"])
+        .output()
+    {
+        if output.status.success() {
+            let s = String::from_utf8(output.stdout).unwrap_or_default();
+            return s
+                .trim()
+                .split(';')
+                .filter(|p| !p.is_empty())
+                .map(|p| p.to_string())
+                .collect();
+        }
+    }
+    let home = std::env::var("HOME").unwrap_or_default();
+    let python_version = std::process::Command::new("python3")
+        .args(["--version"])
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .and_then(|s| {
+            let v = s.trim().split(' ').last().unwrap_or("3.11");
+            Some(v.to_string())
+        })
+        .unwrap_or_else(|| "3.11".to_string());
+
+    let mut paths = vec![
+        format!("{}/.local/lib/python{}/site-packages", home, python_version),
+        format!("/usr/local/lib/python{}/site-packages", python_version),
+        format!("/usr/lib/python{}/site-packages", python_version),
+    ];
+    paths.retain(|p| std::path::Path::new(p).exists());
+    paths
+}
 
 pub(crate) fn load_native_module(name: &str) -> Option<PyValue> {
     match name {
@@ -132,6 +169,11 @@ fn load_sys() -> PyValue {
         .set("argv", PyValue::List(Rc::new(RefCell::new(args))));
 
     let mut paths = vec![PyValue::Str(".".to_string())];
+
+    for sp in get_site_packages() {
+        paths.push(PyValue::Str(sp));
+    }
+
     if let Ok(pythonpath) = env::var("PYTHONPATH") {
         let separator = if cfg!(windows) { ";" } else { ":" };
         for p in pythonpath.split(separator) {
@@ -154,6 +196,16 @@ fn load_sys() -> PyValue {
                     a[0].as_num()? as i32
                 };
                 std::process::exit(code);
+            }),
+        ),
+    );
+
+    env.borrow_mut().set(
+        "modules",
+        PyValue::Builtin(
+            "modules".into(),
+            Rc::new(|_, _, _| {
+                py_err("NotImplementedError", "sys.modules not yet implemented")
             }),
         ),
     );

@@ -442,6 +442,10 @@ impl<'a> Parser<'a> {
             return Ok(Stmt::Import(n));
         }
         if self.match_token(&TokenKind::From) {
+            let mut level = 0;
+            while self.match_token(&TokenKind::Dot) {
+                level += 1;
+            }
             let mod_n = self.parse_dotted_name()?;
             self.expect(TokenKind::Import, "expected 'import'")?;
             let mut names = Vec::new();
@@ -457,7 +461,7 @@ impl<'a> Parser<'a> {
                 }
             }
             self.expect(TokenKind::Newline, "expected newline")?;
-            return Ok(Stmt::FromImport(mod_n, names));
+            return Ok(Stmt::FromImport(mod_n, names, level));
         }
         if self.match_token(&TokenKind::Def) {
             let n = if let TokenKind::Name(n) = &self
