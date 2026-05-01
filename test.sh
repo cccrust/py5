@@ -14,5 +14,5 @@ cargo run py/modern.py
 cargo run py/test_stdlib.py
 cargo run py/test_path.py
 
-PYTHONPATH=./py/ cargo run py/main_import.py
-PYTHONPATH=./py/ cargo run py/main_pkg.py
+PYTHONPATH=./py/import/ cargo run py/import/main_import.py
+PYTHONPATH=./py/pkg/ cargo run py/pkg/main_pkg.py
