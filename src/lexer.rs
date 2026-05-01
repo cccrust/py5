@@ -57,6 +57,7 @@ pub(crate) enum TokenKind {
     Le,
     Gt,
     Ge,
+    Rarrow,
 }
 
 #[derive(Debug, Clone)]
@@ -277,6 +278,8 @@ pub(crate) fn lex_source(source: &str) -> Result<Vec<Token>, String> {
                 (TokenKind::PlusEq, 2)
             } else if i + 1 < chars.len() && chars[i] == '-' && chars[i + 1] == '=' {
                 (TokenKind::MinusEq, 2)
+            } else if i + 1 < chars.len() && chars[i] == '-' && chars[i + 1] == '>' {
+                (TokenKind::Rarrow, 2)
             } else {
                 let k = match c {
                     '(' => {

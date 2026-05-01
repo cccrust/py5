@@ -47,6 +47,12 @@ impl<'a> Parser<'a> {
         while self.match_token(&TokenKind::Newline) {}
     }
 
+    fn maybe_skip_type_annotation(&mut self) {
+        if self.match_token(&TokenKind::Colon) {
+            let _ = self.parse_expr();
+        }
+    }
+
     fn parse_expr_list(&mut self) -> Result<Expr, String> {
         let first = self.parse_expr()?;
         if self.match_token(&TokenKind::Comma) {
@@ -476,6 +482,7 @@ impl<'a> Parser<'a> {
                             {
                                 kwarg = Some(pn.clone());
                             }
+                            self.maybe_skip_type_annotation();
                         } else {
                             if let TokenKind::Name(pn) = &self
                                 .expect(TokenKind::Name("".into()), "expected vararg name")?
@@ -483,6 +490,7 @@ impl<'a> Parser<'a> {
                             {
                                 vararg = Some(pn.clone());
                             }
+                            self.maybe_skip_type_annotation();
                         }
                         if self.match_token(&TokenKind::Comma) {}
                         if self.peek().kind == TokenKind::Rparen {
@@ -491,6 +499,7 @@ impl<'a> Parser<'a> {
                         continue;
                     } else if let TokenKind::Name(pn) = &self.peek().kind.clone() {
                         self.pos += 1;
+                        self.maybe_skip_type_annotation();
                         let def_val = if self.match_token(&TokenKind::Equal) {
                             Some(self.parse_expr()?)
                         } else {
@@ -511,6 +520,9 @@ impl<'a> Parser<'a> {
                     }
                 }
                 self.expect(TokenKind::Rparen, "expected ')'")?;
+            }
+            if self.match_token(&TokenKind::Rarrow) {
+                let _ = self.parse_expr();
             }
             self.expect(TokenKind::Colon, "expected ':'")?;
             return Ok(Stmt::FunctionDef(n, p, vararg, kwarg, self.parse_block()?));
@@ -658,6 +670,61 @@ impl<'a> Parser<'a> {
                 parsed_val
             };
             return Ok(Stmt::Assign(expr, final_val));
+        }
+        if self.match_token(&TokenKind::Colon) {
+            if self.peek().kind == TokenKind::Equal
+                || self.peek().kind == TokenKind::PlusEq
+                || self.peek().kind == TokenKind::MinusEq
+            {
+                let _ = self.parse_expr();
+                let is_aug = self.match_token(&TokenKind::PlusEq)
+                    || self.match_token(&TokenKind::MinusEq);
+                let op = if is_aug {
+                    if self.prev().kind == TokenKind::PlusEq {
+                        crate::ast::Op::Add
+                    } else {
+                        crate::ast::Op::Sub
+                    }
+                } else {
+                    crate::ast::Op::Add
+                };
+                let parsed_val = self.parse_expr_list()?;
+                self.expect(TokenKind::Newline, "expected newline")?;
+                let final_val = if is_aug {
+                    if matches!(expr, Expr::Tuple(_) | Expr::List(_)) {
+                        return Err("SyntaxError: illegal target for augmentation".into());
+                    }
+                    Expr::BinOp(op, Box::new(expr.clone()), Box::new(parsed_val))
+                } else {
+                    parsed_val
+                };
+                return Ok(Stmt::Assign(expr, final_val));
+            } else {
+                let _ = self.parse_expr();
+                if self.match_token(&TokenKind::Equal)
+                    || self.match_token(&TokenKind::PlusEq)
+                    || self.match_token(&TokenKind::MinusEq)
+                {
+                    let is_aug = self.prev().kind == TokenKind::PlusEq
+                        || self.prev().kind == TokenKind::MinusEq;
+                    let op = if self.prev().kind == TokenKind::PlusEq {
+                        crate::ast::Op::Add
+                    } else {
+                        crate::ast::Op::Sub
+                    };
+                    let parsed_val = self.parse_expr_list()?;
+                    self.expect(TokenKind::Newline, "expected newline")?;
+                    let final_val = if is_aug {
+                        if matches!(expr, Expr::Tuple(_) | Expr::List(_)) {
+                            return Err("SyntaxError: illegal target for augmentation".into());
+                        }
+                        Expr::BinOp(op, Box::new(expr.clone()), Box::new(parsed_val))
+                    } else {
+                        parsed_val
+                    };
+                    return Ok(Stmt::Assign(expr, final_val));
+                }
+            }
         }
         self.expect(TokenKind::Newline, "expected newline")?;
         Ok(Stmt::Expr(expr))

@@ -669,6 +669,10 @@ pub(crate) fn call_func(
                     .collect();
                 Ok(PyValue::List(Rc::new(RefCell::new(items))))
             }
+            (PyValue::Dict(d), "copy") => {
+                let new_dict = d.borrow().clone();
+                Ok(PyValue::Dict(Rc::new(RefCell::new(new_dict))))
+            }
             (PyValue::Str(s), "split") => {
                 let sep = if args.is_empty() {
                     " "
