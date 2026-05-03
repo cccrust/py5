@@ -9,6 +9,8 @@ cargo build --release  # or cargo build
 cargo run -- py/basic.py
 ```
 
+Note: The `--` separator is required to pass arguments to the script.
+
 ## Testing
 
 Run all tests via the provided script:
@@ -17,7 +19,9 @@ Run all tests via the provided script:
 ./test.sh
 ```
 
-Key: some tests require `PYTHONPATH` set for import tests:
+Individual test files: `py/basic.py`, `py/oop.py`, `py/magic.py`, `py/io.py`, `py/inherit.py`, `py/args.py`, `py/unpack.py`, `py/adv_oop.py`, `py/modern.py`, `py/test_stdlib.py`, `py/test_path.py`, `py/typed_annotation.py`
+
+Import tests require `PYTHONPATH`:
 ```bash
 PYTHONPATH=./py/import cargo run -- py/import/main_import.py
 PYTHONPATH=./py/pkg cargo run -- py/pkg/main_pkg.py

@@ -14,3 +14,11 @@ cargo run -- py/typed_annotation.py
 
 PYTHONPATH=./py/import cargo run -- py/import/main_import.py
 PYTHONPATH=./py/pkg cargo run -- py/pkg/main_pkg.py
+
+python3 py/pip/server.py &
+SERVER_PID=$!
+sleep 2
+./py5 pip upload mypackage
+./py5 pip install mypackage
+./py5 run py/test_installed_pkg.py
+kill $SERVER_PID 2>/dev/null

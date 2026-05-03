@@ -1,0 +1,19 @@
+#!/bin/bash
+# py5 wrapper - usage: py5 run script.py, py5 pip ...
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR"
+
+if [ "$1" = "run" ]; then
+    shift
+    cargo run -- "$@"
+elif [ "$1" = "pip" ]; then
+    shift
+    if [ "$1" = "server" ]; then
+        python3 py/pip/server.py
+    else
+        python3 py/pip/client.py "$@"
+    fi
+else
+    cargo run -- "$@"
+fi
