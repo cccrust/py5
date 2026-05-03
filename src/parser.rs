@@ -743,3 +743,590 @@ impl<'a> Parser<'a> {
         Ok(b)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tokens_to_expr(source: &str) -> Expr {
+        let tokens = crate::lexer::lex_source(source).unwrap();
+        let mut parser = Parser::new(&tokens, "<test>");
+        parser.parse_expr().unwrap()
+    }
+
+    fn tokens_to_module(source: &str) -> Vec<Stmt> {
+        let tokens = crate::lexer::lex_source(source).unwrap();
+        let mut parser = Parser::new(&tokens, "<test>");
+        parser.parse_module().unwrap()
+    }
+
+    #[test]
+    fn test_parse_int() {
+        let expr = tokens_to_expr("42");
+        assert_eq!(expr, Expr::Int(42));
+    }
+
+    #[test]
+    fn test_parse_float() {
+        let expr = tokens_to_expr("3.14");
+        assert_eq!(expr, Expr::Float(3.14));
+    }
+
+    #[test]
+    fn test_parse_string() {
+        let expr = tokens_to_expr("'hello'");
+        assert_eq!(expr, Expr::String("hello".into()));
+    }
+
+    #[test]
+    fn test_parse_bool_true() {
+        let expr = tokens_to_expr("True");
+        assert_eq!(expr, Expr::Bool(true));
+    }
+
+    #[test]
+    fn test_parse_bool_false() {
+        let expr = tokens_to_expr("False");
+        assert_eq!(expr, Expr::Bool(false));
+    }
+
+    #[test]
+    fn test_parse_none() {
+        let expr = tokens_to_expr("None");
+        assert_eq!(expr, Expr::NoneVal);
+    }
+
+    #[test]
+    fn test_parse_name() {
+        let expr = tokens_to_expr("x");
+        assert_eq!(expr, Expr::Name("x".into()));
+    }
+
+    #[test]
+    fn test_parse_tuple() {
+        let expr = tokens_to_expr("(1, 2, 3)");
+        assert_eq!(expr, Expr::Tuple(vec![Expr::Int(1), Expr::Int(2), Expr::Int(3)]));
+    }
+
+    #[test]
+    fn test_parse_empty_tuple() {
+        let expr = tokens_to_expr("()");
+        assert_eq!(expr, Expr::Tuple(vec![]));
+    }
+
+    #[test]
+    fn test_parse_single_element_tuple() {
+        let expr = tokens_to_expr("(42,)");
+        assert_eq!(expr, Expr::Tuple(vec![Expr::Int(42)]));
+    }
+
+    #[test]
+    fn test_parse_list() {
+        let expr = tokens_to_expr("[1, 2, 3]");
+        assert_eq!(expr, Expr::List(vec![Expr::Int(1), Expr::Int(2), Expr::Int(3)]));
+    }
+
+    #[test]
+    fn test_parse_empty_list() {
+        let expr = tokens_to_expr("[]");
+        assert_eq!(expr, Expr::List(vec![]));
+    }
+
+    #[test]
+    fn test_parse_dict() {
+        let expr = tokens_to_expr("{'a': 1, 'b': 2}");
+        assert!(matches!(expr, Expr::Dict(_)));
+    }
+
+    #[test]
+    fn test_parse_empty_dict() {
+        let expr = tokens_to_expr("{}");
+        assert!(matches!(expr, Expr::Dict(_)));
+        if let Expr::Dict(pairs) = expr {
+            assert!(pairs.is_empty());
+        }
+    }
+
+    #[test]
+    fn test_parse_add() {
+        let expr = tokens_to_expr("1 + 2");
+        assert_eq!(
+            expr,
+            Expr::BinOp(
+                crate::ast::Op::Add,
+                Box::new(Expr::Int(1)),
+                Box::new(Expr::Int(2))
+            )
+        );
+    }
+
+    #[test]
+    fn test_parse_subtract() {
+        let expr = tokens_to_expr("5 - 3");
+        assert_eq!(
+            expr,
+            Expr::BinOp(
+                crate::ast::Op::Sub,
+                Box::new(Expr::Int(5)),
+                Box::new(Expr::Int(3))
+            )
+        );
+    }
+
+    #[test]
+    fn test_parse_multiply() {
+        let expr = tokens_to_expr("4 * 2");
+        assert_eq!(
+            expr,
+            Expr::BinOp(
+                crate::ast::Op::Mul,
+                Box::new(Expr::Int(4)),
+                Box::new(Expr::Int(2))
+            )
+        );
+    }
+
+    #[test]
+    fn test_parse_divide() {
+        let expr = tokens_to_expr("10 / 2");
+        assert_eq!(
+            expr,
+            Expr::BinOp(
+                crate::ast::Op::Div,
+                Box::new(Expr::Int(10)),
+                Box::new(Expr::Int(2))
+            )
+        );
+    }
+
+    #[test]
+    fn test_parse_modulo() {
+        let expr = tokens_to_expr("10 % 3");
+        assert_eq!(
+            expr,
+            Expr::BinOp(
+                crate::ast::Op::Mod,
+                Box::new(Expr::Int(10)),
+                Box::new(Expr::Int(3))
+            )
+        );
+    }
+
+    #[test]
+    fn test_parse_unary_neg() {
+        let expr = tokens_to_expr("-5");
+        assert_eq!(
+            expr,
+            Expr::UnaryOp(crate::ast::Op::Neg, Box::new(Expr::Int(5)))
+        );
+    }
+
+    #[test]
+    fn test_parse_unary_not() {
+        let expr = tokens_to_expr("not True");
+        assert_eq!(
+            expr,
+            Expr::UnaryOp(crate::ast::Op::Not, Box::new(Expr::Bool(true)))
+        );
+    }
+
+    #[test]
+    fn test_parse_comparison_eq() {
+        let expr = tokens_to_expr("1 == 2");
+        assert_eq!(
+            expr,
+            Expr::Compare(
+                crate::ast::Op::Eq,
+                Box::new(Expr::Int(1)),
+                Box::new(Expr::Int(2))
+            )
+        );
+    }
+
+    #[test]
+    fn test_parse_comparison_ne() {
+        let expr = tokens_to_expr("1 != 2");
+        assert_eq!(
+            expr,
+            Expr::Compare(
+                crate::ast::Op::Ne,
+                Box::new(Expr::Int(1)),
+                Box::new(Expr::Int(2))
+            )
+        );
+    }
+
+    #[test]
+    fn test_parse_comparison_lt() {
+        let expr = tokens_to_expr("1 < 2");
+        assert_eq!(
+            expr,
+            Expr::Compare(
+                crate::ast::Op::Lt,
+                Box::new(Expr::Int(1)),
+                Box::new(Expr::Int(2))
+            )
+        );
+    }
+
+    #[test]
+    fn test_parse_comparison_le() {
+        let expr = tokens_to_expr("1 <= 2");
+        assert_eq!(
+            expr,
+            Expr::Compare(
+                crate::ast::Op::Le,
+                Box::new(Expr::Int(1)),
+                Box::new(Expr::Int(2))
+            )
+        );
+    }
+
+    #[test]
+    fn test_parse_comparison_gt() {
+        let expr = tokens_to_expr("2 > 1");
+        assert_eq!(
+            expr,
+            Expr::Compare(
+                crate::ast::Op::Gt,
+                Box::new(Expr::Int(2)),
+                Box::new(Expr::Int(1))
+            )
+        );
+    }
+
+    #[test]
+    fn test_parse_comparison_ge() {
+        let expr = tokens_to_expr("2 >= 1");
+        assert_eq!(
+            expr,
+            Expr::Compare(
+                crate::ast::Op::Ge,
+                Box::new(Expr::Int(2)),
+                Box::new(Expr::Int(1))
+            )
+        );
+    }
+
+    #[test]
+    fn test_parse_logical_and() {
+        let expr = tokens_to_expr("True and False");
+        assert_eq!(
+            expr,
+            Expr::Logical(
+                crate::ast::LogicOp::And,
+                Box::new(Expr::Bool(true)),
+                Box::new(Expr::Bool(false))
+            )
+        );
+    }
+
+    #[test]
+    fn test_parse_logical_or() {
+        let expr = tokens_to_expr("True or False");
+        assert_eq!(
+            expr,
+            Expr::Logical(
+                crate::ast::LogicOp::Or,
+                Box::new(Expr::Bool(true)),
+                Box::new(Expr::Bool(false))
+            )
+        );
+    }
+
+    #[test]
+    fn test_parse_precedence_mul_over_add() {
+        let expr = tokens_to_expr("1 + 2 * 3");
+        assert_eq!(
+            expr,
+            Expr::BinOp(
+                crate::ast::Op::Add,
+                Box::new(Expr::Int(1)),
+                Box::new(Expr::BinOp(
+                    crate::ast::Op::Mul,
+                    Box::new(Expr::Int(2)),
+                    Box::new(Expr::Int(3))
+                ))
+            )
+        );
+    }
+
+    #[test]
+    fn test_parse_lambda() {
+        let expr = tokens_to_expr("lambda x: x + 1");
+        assert_eq!(
+            expr,
+            Expr::Lambda(
+                vec!["x".into()],
+                Box::new(Expr::BinOp(
+                    crate::ast::Op::Add,
+                    Box::new(Expr::Name("x".into())),
+                    Box::new(Expr::Int(1))
+                ))
+            )
+        );
+    }
+
+    #[test]
+    fn test_parse_lambda_multi_param() {
+        let expr = tokens_to_expr("lambda x, y: x + y");
+        assert_eq!(
+            expr,
+            Expr::Lambda(
+                vec!["x".into(), "y".into()],
+                Box::new(Expr::BinOp(
+                    crate::ast::Op::Add,
+                    Box::new(Expr::Name("x".into())),
+                    Box::new(Expr::Name("y".into()))
+                ))
+            )
+        );
+    }
+
+    #[test]
+    fn test_parse_function_call() {
+        let expr = tokens_to_expr("foo()");
+        assert!(matches!(expr, Expr::Call(_, _, _)));
+    }
+
+    #[test]
+    fn test_parse_function_call_with_args() {
+        let expr = tokens_to_expr("foo(1, 2, 3)");
+        if let Expr::Call(func, args, _) = expr {
+            assert_eq!(func.as_ref(), &Expr::Name("foo".into()));
+            assert_eq!(args.len(), 3);
+        } else {
+            panic!("Expected Call expression");
+        }
+    }
+
+    #[test]
+    fn test_parse_attribute_access() {
+        let expr = tokens_to_expr("obj.attr");
+        assert_eq!(
+            expr,
+            Expr::Attribute(Box::new(Expr::Name("obj".into())), "attr".into())
+        );
+    }
+
+    #[test]
+    fn test_parse_subscript() {
+        let expr = tokens_to_expr("arr[0]");
+        if let Expr::Subscript(obj, idx) = expr {
+            assert_eq!(obj.as_ref(), &Expr::Name("arr".into()));
+            assert_eq!(idx.as_ref(), &Expr::Int(0));
+        } else {
+            panic!("Expected Subscript expression");
+        }
+    }
+
+    #[test]
+    fn test_parse_list_comprehension() {
+        let expr = tokens_to_expr("[x for x in items]");
+        assert!(matches!(expr, Expr::ListComp(_, _, _, _)));
+    }
+
+    #[test]
+    fn test_parse_list_comprehension_with_filter() {
+        let expr = tokens_to_expr("[x for x in items if x > 0]");
+        assert!(matches!(expr, Expr::ListComp(_, _, _, Some(_))));
+    }
+
+    #[test]
+    fn test_parse_assignment() {
+        let stmts = tokens_to_module("x = 5");
+        assert_eq!(stmts.len(), 1);
+        assert!(matches!(stmts[0], Stmt::Assign(_, _)));
+    }
+
+    #[test]
+    fn test_parse_if_statement() {
+        let stmts = tokens_to_module("if x:\n    pass");
+        assert_eq!(stmts.len(), 1);
+        assert!(matches!(&stmts[0], Stmt::If(_, _, _)));
+    }
+
+    #[test]
+    fn test_parse_while_statement() {
+        let stmts = tokens_to_module("while True:\n    pass");
+        assert_eq!(stmts.len(), 1);
+        assert!(matches!(&stmts[0], Stmt::While(_, _)));
+    }
+
+    #[test]
+    fn test_parse_for_statement() {
+        let stmts = tokens_to_module("for x in items:\n    pass");
+        assert_eq!(stmts.len(), 1);
+        assert!(matches!(&stmts[0], Stmt::For(_, _, _)));
+    }
+
+    #[test]
+    fn test_parse_function_def() {
+        let stmts = tokens_to_module("def foo():\n    pass");
+        assert_eq!(stmts.len(), 1);
+        assert!(matches!(&stmts[0], Stmt::FunctionDef(_, _, _, _, _)));
+    }
+
+    #[test]
+    fn test_parse_function_def_with_params() {
+        let stmts = tokens_to_module("def foo(x, y):\n    pass");
+        if let Stmt::FunctionDef(name, params, _, _, _) = &stmts[0] {
+            assert_eq!(name, "foo");
+            assert_eq!(params.len(), 2);
+        } else {
+            panic!("Expected FunctionDef");
+        }
+    }
+
+    #[test]
+    fn test_parse_function_def_with_return_type() {
+        let stmts = tokens_to_module("def foo() -> int:\n    pass");
+        if let Stmt::FunctionDef(name, _, _, _, _) = &stmts[0] {
+            assert_eq!(name, "foo");
+        } else {
+            panic!("Expected FunctionDef");
+        }
+    }
+
+    #[test]
+    fn test_parse_class_def() {
+        let stmts = tokens_to_module("class Foo:\n    pass");
+        assert_eq!(stmts.len(), 1);
+        assert!(matches!(&stmts[0], Stmt::ClassDef(_, _, _)));
+    }
+
+    #[test]
+    fn test_parse_class_def_with_base() {
+        let stmts = tokens_to_module("class Foo(Bar):\n    pass");
+        if let Stmt::ClassDef(name, base, _) = &stmts[0] {
+            assert_eq!(name, "Foo");
+            assert!(base.is_some());
+        } else {
+            panic!("Expected ClassDef");
+        }
+    }
+
+    #[test]
+    fn test_parse_return() {
+        let stmts = tokens_to_module("return 42");
+        assert_eq!(stmts.len(), 1);
+        assert!(matches!(&stmts[0], Stmt::Return(_)));
+    }
+
+    #[test]
+    fn test_parse_return_none() {
+        let stmts = tokens_to_module("return");
+        assert_eq!(stmts.len(), 1);
+        assert!(matches!(&stmts[0], Stmt::Return(None)));
+    }
+
+    #[test]
+    fn test_parse_break() {
+        let stmts = tokens_to_module("break");
+        assert_eq!(stmts.len(), 1);
+        assert!(matches!(&stmts[0], Stmt::Break));
+    }
+
+    #[test]
+    fn test_parse_continue() {
+        let stmts = tokens_to_module("continue");
+        assert_eq!(stmts.len(), 1);
+        assert!(matches!(&stmts[0], Stmt::Continue));
+    }
+
+    #[test]
+    fn test_parse_pass() {
+        let stmts = tokens_to_module("pass");
+        assert_eq!(stmts.len(), 1);
+        assert!(matches!(&stmts[0], Stmt::Pass));
+    }
+
+    #[test]
+    fn test_parse_try_except() {
+        let stmts = tokens_to_module("try:\n    pass\nexcept:\n    pass");
+        assert_eq!(stmts.len(), 1);
+        assert!(matches!(&stmts[0], Stmt::Try(_, _)));
+    }
+
+    #[test]
+    fn test_parse_raise() {
+        let stmts = tokens_to_module("raise Exception('error')");
+        assert_eq!(stmts.len(), 1);
+        assert!(matches!(&stmts[0], Stmt::Raise(_)));
+    }
+
+    #[test]
+    fn test_parse_import() {
+        let stmts = tokens_to_module("import os");
+        assert_eq!(stmts.len(), 1);
+        assert!(matches!(&stmts[0], Stmt::Import(_)));
+    }
+
+    #[test]
+    fn test_parse_from_import() {
+        let stmts = tokens_to_module("from os import path");
+        assert_eq!(stmts.len(), 1);
+        assert!(matches!(&stmts[0], Stmt::FromImport(_, _, _)));
+    }
+
+    #[test]
+    fn test_parse_augmented_assignment_plus() {
+        let stmts = tokens_to_module("x += 1");
+        assert_eq!(stmts.len(), 1);
+        assert!(matches!(&stmts[0], Stmt::Assign(Expr::Name(_), _)));
+    }
+
+    #[test]
+    fn test_parse_augmented_assignment_minus() {
+        let stmts = tokens_to_module("x -= 1");
+        assert_eq!(stmts.len(), 1);
+        assert!(matches!(&stmts[0], Stmt::Assign(Expr::Name(_), _)));
+    }
+
+    #[test]
+    fn test_parse_multiple_statements() {
+        let stmts = tokens_to_module("x = 1\ny = 2\nz = 3");
+        assert_eq!(stmts.len(), 3);
+    }
+
+    #[test]
+    fn test_parse_expression_statement() {
+        let stmts = tokens_to_module("foo()");
+        assert_eq!(stmts.len(), 1);
+        assert!(matches!(&stmts[0], Stmt::Expr(_)));
+    }
+
+    #[test]
+    fn test_parse_nested_call() {
+        let expr = tokens_to_expr("foo(bar(x))");
+        if let Expr::Call(_, args, _) = expr {
+            if let Expr::Call(_, _, _) = args[0] {
+                // OK
+            } else {
+                panic!("Expected nested call");
+            }
+        } else {
+            panic!("Expected Call expression");
+        }
+    }
+
+    #[test]
+    fn test_parse_chained_attribute() {
+        let expr = tokens_to_expr("a.b.c");
+        let expected = Expr::Attribute(
+            Box::new(Expr::Attribute(Box::new(Expr::Name("a".into())), "b".into())),
+            "c".into(),
+        );
+        assert_eq!(expr, expected);
+    }
+
+    #[test]
+    fn test_parse_chained_comparison() {
+        let expr = tokens_to_expr("1 < 2 < 3");
+        if let Expr::Compare(op, _left, _right) = expr {
+            assert_eq!(op, crate::ast::Op::Lt);
+        } else {
+            panic!("Expected Compare expression, got {:?}", expr);
+        }
+    }
+}

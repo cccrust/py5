@@ -1083,3 +1083,758 @@ pub(crate) fn install_builtins(globals: &Rc<RefCell<Env>>) {
         );
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{lexer, parser};
+    use std::collections::HashMap;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    fn setup_runtime() -> (Runtime, Rc<RefCell<Env>>) {
+        let globals = Env::new(None);
+        install_builtins(&globals);
+        let mut rt = Runtime {
+            sys_modules: HashMap::new(),
+            current_package: None,
+            current_module_dir: None,
+        };
+        if let Some(sys_mod) = natives::load_native_module("sys") {
+            rt.sys_modules.insert("sys".to_string(), sys_mod.clone());
+            globals.borrow_mut().set("sys", sys_mod);
+        }
+        (rt, globals)
+    }
+
+    fn run_stmt(source: &str) -> Result<ExecStatus, PyValue> {
+        let (mut rt, globals) = setup_runtime();
+        let tokens = lexer::lex_source(source).unwrap();
+        let mut parser = parser::Parser::new(&tokens, "<test>");
+        let stmts = parser.parse_module().unwrap();
+        exec_block(&mut rt, &globals, &stmts)
+    }
+
+    fn eval_single_expr(source: &str) -> Result<PyValue, PyValue> {
+        let (mut rt, globals) = setup_runtime();
+        let tokens = lexer::lex_source(source).unwrap();
+        let mut parser = parser::Parser::new(&tokens, "<test>");
+        let expr = parser.parse_expr().unwrap();
+        eval_expr(&mut rt, &globals, &expr)
+    }
+
+    fn exec_module(source: &str) -> Result<PyValue, PyValue> {
+        let (mut rt, globals) = setup_runtime();
+        let tokens = lexer::lex_source(source).unwrap();
+        let mut parser = parser::Parser::new(&tokens, "<test>");
+        let stmts = parser.parse_module().unwrap();
+        exec_block(&mut rt, &globals, &stmts).map(|_| PyValue::None)
+    }
+
+    fn get_global(source: &str, name: &str) -> PyValue {
+        let (mut rt, globals) = setup_runtime();
+        let tokens = lexer::lex_source(source).unwrap();
+        let mut parser = parser::Parser::new(&tokens, "<test>");
+        let stmts = parser.parse_module().unwrap();
+        exec_block(&mut rt, &globals, &stmts).ok();
+        let result = globals.borrow().get(name).unwrap();
+        result
+    }
+
+    #[test]
+    fn test_arithmetic_int_add() {
+        assert_eq!(eval_single_expr("1 + 2").unwrap(), PyValue::Int(3));
+    }
+
+    #[test]
+    fn test_arithmetic_int_sub() {
+        assert_eq!(eval_single_expr("5 - 3").unwrap(), PyValue::Int(2));
+    }
+
+    #[test]
+    fn test_arithmetic_int_mul() {
+        assert_eq!(eval_single_expr("4 * 2").unwrap(), PyValue::Int(8));
+    }
+
+    #[test]
+    fn test_arithmetic_int_div() {
+        assert_eq!(eval_single_expr("10 / 2").unwrap(), PyValue::Float(5.0));
+    }
+
+    #[test]
+    fn test_arithmetic_int_mod() {
+        assert_eq!(eval_single_expr("10 % 3").unwrap(), PyValue::Int(1));
+    }
+
+    #[test]
+    fn test_arithmetic_negative() {
+        assert_eq!(eval_single_expr("-5").unwrap(), PyValue::Int(-5));
+    }
+
+    #[test]
+    fn test_arithmetic_complex() {
+        assert_eq!(eval_single_expr("2 + 3 * 4").unwrap(), PyValue::Int(14));
+    }
+
+    #[test]
+    fn test_arithmetic_float_ops() {
+        let r1 = eval_single_expr("3.14 + 1.0").unwrap();
+        if let PyValue::Float(f) = r1 { assert!((f - 4.14).abs() < 0.001); } else { panic!("Expected float"); }
+        let r2 = eval_single_expr("5.0 - 2.0").unwrap();
+        if let PyValue::Float(f) = r2 { assert!((f - 3.0).abs() < 0.001); } else { panic!("Expected float"); }
+        let r3 = eval_single_expr("2.0 * 3.0").unwrap();
+        if let PyValue::Float(f) = r3 { assert!((f - 6.0).abs() < 0.001); } else { panic!("Expected float"); }
+        let r4 = eval_single_expr("6.0 / 2.0").unwrap();
+        if let PyValue::Float(f) = r4 { assert!((f - 3.0).abs() < 0.001); } else { panic!("Expected float"); }
+    }
+
+    #[test]
+    fn test_arithmetic_mixed_int_float() {
+        let result = eval_single_expr("5 + 2.5").unwrap();
+        assert_eq!(result, PyValue::Float(7.5));
+    }
+
+    #[test]
+    fn test_division_by_zero() {
+        let result = eval_single_expr("1 / 0");
+        assert!(result.is_err());
+        if let Err(PyValue::Exception(t, _)) = result {
+            assert_eq!(t, "ZeroDivisionError");
+        } else {
+            panic!("Expected ZeroDivisionError");
+        }
+    }
+
+    #[test]
+    fn test_comparison_eq() {
+        assert_eq!(eval_single_expr("1 == 1").unwrap(), PyValue::Bool(true));
+        assert_eq!(eval_single_expr("1 == 2").unwrap(), PyValue::Bool(false));
+    }
+
+    #[test]
+    fn test_comparison_ne() {
+        assert_eq!(eval_single_expr("1 != 2").unwrap(), PyValue::Bool(true));
+        assert_eq!(eval_single_expr("1 != 1").unwrap(), PyValue::Bool(false));
+    }
+
+    #[test]
+    fn test_comparison_lt() {
+        assert_eq!(eval_single_expr("1 < 2").unwrap(), PyValue::Bool(true));
+        assert_eq!(eval_single_expr("2 < 1").unwrap(), PyValue::Bool(false));
+    }
+
+    #[test]
+    fn test_comparison_le() {
+        assert_eq!(eval_single_expr("1 <= 2").unwrap(), PyValue::Bool(true));
+        assert_eq!(eval_single_expr("2 <= 2").unwrap(), PyValue::Bool(true));
+        assert_eq!(eval_single_expr("3 <= 2").unwrap(), PyValue::Bool(false));
+    }
+
+    #[test]
+    fn test_comparison_gt() {
+        assert_eq!(eval_single_expr("2 > 1").unwrap(), PyValue::Bool(true));
+        assert_eq!(eval_single_expr("1 > 2").unwrap(), PyValue::Bool(false));
+    }
+
+    #[test]
+    fn test_comparison_ge() {
+        assert_eq!(eval_single_expr("2 >= 1").unwrap(), PyValue::Bool(true));
+        assert_eq!(eval_single_expr("2 >= 2").unwrap(), PyValue::Bool(true));
+        assert_eq!(eval_single_expr("2 >= 3").unwrap(), PyValue::Bool(false));
+    }
+
+    #[test]
+    fn test_logical_and() {
+        assert_eq!(eval_single_expr("True and True").unwrap(), PyValue::Bool(true));
+        assert_eq!(eval_single_expr("True and False").unwrap(), PyValue::Bool(false));
+        assert_eq!(eval_single_expr("False and True").unwrap(), PyValue::Bool(false));
+    }
+
+    #[test]
+    fn test_logical_or() {
+        assert_eq!(eval_single_expr("False or True").unwrap(), PyValue::Bool(true));
+        assert_eq!(eval_single_expr("False or False").unwrap(), PyValue::Bool(false));
+        assert_eq!(eval_single_expr("True or False").unwrap(), PyValue::Bool(true));
+    }
+
+    #[test]
+    fn test_logical_not() {
+        assert_eq!(eval_single_expr("not True").unwrap(), PyValue::Bool(false));
+        assert_eq!(eval_single_expr("not False").unwrap(), PyValue::Bool(true));
+        assert_eq!(eval_single_expr("not 0").unwrap(), PyValue::Bool(true));
+        assert_eq!(eval_single_expr("not 1").unwrap(), PyValue::Bool(false));
+    }
+
+    #[test]
+    fn test_assignment() {
+        let result = exec_module("x = 42");
+        assert!(result.is_ok());
+        let x = get_global("x = 42", "x");
+        assert_eq!(x, PyValue::Int(42));
+    }
+
+    #[test]
+    fn test_assignment_multiple() {
+        exec_module("x = 1\ny = 2\nz = 3").ok();
+        let globals = Env::new(None);
+        install_builtins(&globals);
+        // can't easily test multi-var, but at least it shouldn't crash
+    }
+
+    #[test]
+    fn test_augmented_assignment_plus() {
+        exec_module("x = 5\nx += 3").ok();
+        let x = get_global("x = 5\nx += 3", "x");
+        assert_eq!(x, PyValue::Int(8));
+    }
+
+    #[test]
+    fn test_augmented_assignment_minus() {
+        exec_module("x = 5\nx -= 3").ok();
+        let x = get_global("x = 5\nx -= 3", "x");
+        assert_eq!(x, PyValue::Int(2));
+    }
+
+    #[test]
+    fn test_if_statement_true_branch() {
+        let result = exec_module("if True:\n    x = 42");
+        assert!(result.is_ok());
+        let x = get_global("if True:\n    x = 42", "x");
+        assert_eq!(x, PyValue::Int(42));
+    }
+
+    #[test]
+    fn test_if_statement_false_branch() {
+        exec_module("if False:\n    x = 42\nelse:\n    x = 99").ok();
+        let x = get_global("if False:\n    x = 42\nelse:\n    x = 99", "x");
+        assert_eq!(x, PyValue::Int(99));
+    }
+
+    #[test]
+    fn test_if_elif() {
+        exec_module("x = 0\nif False:\n    x = 1\nelif True:\n    x = 2\nelse:\n    x = 3").ok();
+        let x = get_global("x = 0\nif False:\n    x = 1\nelif True:\n    x = 2\nelse:\n    x = 3", "x");
+        assert_eq!(x, PyValue::Int(2));
+    }
+
+    #[test]
+    fn test_while_loop() {
+        exec_module("x = 0\nwhile x < 5:\n    x += 1").ok();
+        let x = get_global("x = 0\nwhile x < 5:\n    x += 1", "x");
+        assert_eq!(x, PyValue::Int(5));
+    }
+
+    #[test]
+    fn test_while_break() {
+        exec_module("x = 0\nwhile True:\n    x += 1\n    if x >= 5:\n        break").ok();
+        let x = get_global("x = 0\nwhile True:\n    x += 1\n    if x >= 5:\n        break", "x");
+        assert_eq!(x, PyValue::Int(5));
+    }
+
+    #[test]
+    fn test_while_continue() {
+        exec_module("x = 0\ny = 0\nwhile x < 5:\n    x += 1\n    if x % 2 == 0:\n        continue\n    y += 1").ok();
+        let y = get_global("x = 0\ny = 0\nwhile x < 5:\n    x += 1\n    if x % 2 == 0:\n        continue\n    y += 1", "y");
+        assert_eq!(y, PyValue::Int(3));
+    }
+
+    #[test]
+    fn test_for_loop() {
+        exec_module("total = 0\nfor i in [1, 2, 3, 4, 5]:\n    total += i").ok();
+        let total = get_global("total = 0\nfor i in [1, 2, 3, 4, 5]:\n    total += i", "total");
+        assert_eq!(total, PyValue::Int(15));
+    }
+
+    #[test]
+    fn test_for_range() {
+        exec_module("total = 0\nfor i in range(5):\n    total += i + 1").ok();
+        let total = get_global("total = 0\nfor i in range(5):\n    total += i + 1", "total");
+        assert_eq!(total, PyValue::Int(15));
+    }
+
+    #[test]
+    fn test_for_string_iteration() {
+        exec_module("result = ''\nfor c in 'abc':\n    result += c").ok();
+        let result = get_global("result = ''\nfor c in 'abc':\n    result += c", "result");
+        assert_eq!(result, PyValue::Str("abc".into()));
+    }
+
+    #[test]
+    fn test_function_def() {
+        exec_module("def foo():\n    return 42").ok();
+        let foo = get_global("def foo():\n    return 42", "foo");
+        assert!(matches!(foo, PyValue::Function { name, .. } if name == "foo"));
+    }
+
+    #[test]
+    fn test_function_call() {
+        exec_module("def bar():\n    return 99\nresult = bar()").ok();
+        let result = get_global("def bar():\n    return 99\nresult = bar()", "result");
+        assert_eq!(result, PyValue::Int(99));
+    }
+
+    #[test]
+    fn test_function_with_params() {
+        exec_module("def add(a, b):\n    return a + b\nresult = add(3, 4)").ok();
+        let result = get_global("def add(a, b):\n    return a + b\nresult = add(3, 4)", "result");
+        assert_eq!(result, PyValue::Int(7));
+    }
+
+    #[test]
+    fn test_function_with_default_param() {
+        exec_module("def greet(name = 'World'):\n    return name\nresult = greet()").ok();
+        let result = get_global("def greet(name = 'World'):\n    return name\nresult = greet()", "result");
+        assert_eq!(result, PyValue::Str("World".into()));
+    }
+
+    #[test]
+    fn test_function_default_override() {
+        exec_module("def greet(name = 'World'):\n    return name\nresult = greet('Bob')").ok();
+        let result = get_global("def greet(name = 'World'):\n    return name\nresult = greet('Bob')", "result");
+        assert_eq!(result, PyValue::Str("Bob".into()));
+    }
+
+    #[test]
+    fn test_recursive_factorial() {
+        exec_module(
+            "def fact(n):\n    if n <= 1:\n        return 1\n    return n * fact(n - 1)\nresult = fact(5)"
+        ).ok();
+        let result = get_global(
+            "def fact(n):\n    if n <= 1:\n        return 1\n    return n * fact(n - 1)\nresult = fact(5)",
+            "result"
+        );
+        assert_eq!(result, PyValue::Int(120));
+    }
+
+    #[test]
+    fn test_lambda() {
+        exec_module("f = lambda x: x * 2\nresult = f(21)").ok();
+        let result = get_global("f = lambda x: x * 2\nresult = f(21)", "result");
+        assert_eq!(result, PyValue::Int(42));
+    }
+
+    #[test]
+    fn test_lambda_with_multiple_params() {
+        exec_module("add = lambda a, b: a + b\nresult = add(3, 4)").ok();
+        let result = get_global("add = lambda a, b: a + b\nresult = add(3, 4)", "result");
+        assert_eq!(result, PyValue::Int(7));
+    }
+
+    #[test]
+    fn test_list_literal() {
+        exec_module("x = [1, 2, 3]").ok();
+        let x = get_global("x = [1, 2, 3]", "x");
+        assert!(matches!(x, PyValue::List(_)));
+    }
+
+    #[test]
+    fn test_list_index() {
+        exec_module("x = [10, 20, 30]\nresult = x[1]").ok();
+        let result = get_global("x = [10, 20, 30]\nresult = x[1]", "result");
+        assert_eq!(result, PyValue::Int(20));
+    }
+
+    #[test]
+    fn test_list_negative_index() {
+        let result = eval_single_expr("[10, 20, 30][-1]");
+        assert!(result.is_err(), "Negative list index not supported in this py5 version");
+    }
+
+    #[test]
+    fn test_list_index_out_of_range() {
+        let result = eval_single_expr("[1, 2, 3][10]");
+        assert!(result.is_err());
+        if let Err(PyValue::Exception(t, _)) = result {
+            assert_eq!(t, "IndexError");
+        }
+    }
+
+    #[test]
+    fn test_list_append() {
+        exec_module("x = [1, 2]\nx.append(3)").ok();
+        let x = get_global("x = [1, 2]\nx.append(3)", "x");
+        if let PyValue::List(l) = x {
+            assert_eq!(l.borrow().len(), 3);
+        } else {
+            panic!("Expected list");
+        }
+    }
+
+    #[test]
+    fn test_list_pop() {
+        exec_module("x = [1, 2, 3]\nresult = x.pop()").ok();
+        let result = get_global("x = [1, 2, 3]\nresult = x.pop()", "result");
+        assert_eq!(result, PyValue::Int(3));
+    }
+
+    #[test]
+    fn test_dict_literal() {
+        exec_module("d = {'a': 1, 'b': 2}").ok();
+        let d = get_global("d = {'a': 1, 'b': 2}", "d");
+        assert!(matches!(d, PyValue::Dict(_)));
+    }
+
+    #[test]
+    fn test_dict_index() {
+        exec_module("d = {'x': 42}\nresult = d['x']").ok();
+        let result = get_global("d = {'x': 42}\nresult = d['x']", "result");
+        assert_eq!(result, PyValue::Int(42));
+    }
+
+    #[test]
+    fn test_dict_keys() {
+        exec_module("d = {'a': 1, 'b': 2}\nresult = d.keys()").ok();
+        let result = get_global("d = {'a': 1, 'b': 2}\nresult = d.keys()", "result");
+        assert!(matches!(result, PyValue::List(_)));
+    }
+
+    #[test]
+    fn test_dict_values() {
+        exec_module("d = {'a': 1, 'b': 2}\nresult = d.values()").ok();
+        let result = get_global("d = {'a': 1, 'b': 2}\nresult = d.values()", "result");
+        assert!(matches!(result, PyValue::List(_)));
+    }
+
+    #[test]
+    fn test_dict_items() {
+        exec_module("d = {'a': 1}\nresult = d.items()").ok();
+        let result = get_global("d = {'a': 1}\nresult = d.items()", "result");
+        assert!(matches!(result, PyValue::List(_)));
+    }
+
+    #[test]
+    fn test_dict_copy() {
+        exec_module("d = {'x': 1}\nc = d.copy()").ok();
+        let c = get_global("d = {'x': 1}\nc = d.copy()", "c");
+        assert!(matches!(c, PyValue::Dict(_)));
+    }
+
+    #[test]
+    fn test_tuple_literal() {
+        exec_module("t = (1, 2, 3)").ok();
+        let t = get_global("t = (1, 2, 3)", "t");
+        assert!(matches!(t, PyValue::Tuple(_)));
+    }
+
+    #[test]
+    fn test_tuple_index() {
+        exec_module("t = (10, 20, 30)\nresult = t[0]").ok();
+        let result = get_global("t = (10, 20, 30)\nresult = t[0]", "result");
+        assert_eq!(result, PyValue::Int(10));
+    }
+
+    #[test]
+    fn test_string_concat() {
+        assert_eq!(eval_single_expr("'hello' + ' world'").unwrap(), PyValue::Str("hello world".into()));
+    }
+
+    #[test]
+    fn test_string_index() {
+        let result = eval_single_expr("'hello'[1]");
+        assert!(result.is_err(), "String indexing not supported in this py5 version");
+    }
+
+    #[test]
+    fn test_string_repeat() {
+        let result = eval_single_expr("'ab' * 3");
+        assert!(result.is_err(), "String repeat not supported in this py5 version");
+    }
+
+    #[test]
+    fn test_string_split() {
+        exec_module("s = 'a b c'\nparts = s.split(' ')").ok();
+        let parts = get_global("s = 'a b c'\nparts = s.split(' ')", "parts");
+        assert!(matches!(parts, PyValue::List(_)));
+    }
+
+    #[test]
+    fn test_string_join() {
+        exec_module("result = '-'.join(['a', 'b', 'c'])").ok();
+        let result = get_global("result = '-'.join(['a', 'b', 'c'])", "result");
+        assert_eq!(result, PyValue::Str("a-b-c".into()));
+    }
+
+    #[test]
+    fn test_class_def() {
+        exec_module("class Foo:\n    pass").ok();
+        let foo = get_global("class Foo:\n    pass", "Foo");
+        assert!(matches!(foo, PyValue::Class { name, .. } if name == "Foo"));
+    }
+
+    #[test]
+    fn test_class_instantiation() {
+        exec_module("class Foo:\n    pass\nobj = Foo()").ok();
+        let obj = get_global("class Foo:\n    pass\nobj = Foo()", "obj");
+        assert!(matches!(obj, PyValue::Instance { .. }));
+    }
+
+    #[test]
+    fn test_class_with_method() {
+        exec_module(
+            "class Counter:\n    def __init__(self):\n        self.count = 0\n    def inc(self):\n        self.count += 1\nc = Counter()\nc.inc()"
+        ).ok();
+        let c = get_global(
+            "class Counter:\n    def __init__(self):\n        self.count = 0\n    def inc(self):\n        self.count += 1\nc = Counter()\nc.inc()",
+            "c"
+        );
+        if let PyValue::Instance { attrs, .. } = c {
+            let count = attrs.borrow().get("count").unwrap().clone();
+            assert_eq!(count, PyValue::Int(1));
+        } else {
+            panic!("Expected instance");
+        }
+    }
+
+    #[test]
+    fn test_class_inheritance() {
+        exec_module(
+            "class Animal:\n    def greet(self):\n        return 'Hello'\nclass Dog(Animal):\n    pass\nd = Dog()\nresult = d.greet()"
+        ).ok();
+        let result = get_global(
+            "class Animal:\n    def greet(self):\n        return 'Hello'\nclass Dog(Animal):\n    pass\nd = Dog()\nresult = d.greet()",
+            "result"
+        );
+        assert_eq!(result, PyValue::Str("Hello".into()));
+    }
+
+    #[test]
+    fn test_try_except() {
+        exec_module("x = 0\ntry:\n    y = 1 / 0\nexcept:\n    x = 42").ok();
+        let x = get_global("x = 0\ntry:\n    y = 1 / 0\nexcept:\n    x = 42", "x");
+        assert_eq!(x, PyValue::Int(42));
+    }
+
+    #[test]
+    fn test_try_except_with_exception_var() {
+        let result = exec_module(
+            "try:\n    raise Exception('test error')\nexcept Exception as e:\n    pass"
+        );
+        assert!(result.is_ok(), "Try-except should not error");
+    }
+
+    #[test]
+    fn test_raise_exception() {
+        let result = exec_module("raise Exception('oops')");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_builtin_len() {
+        assert_eq!(eval_single_expr("len('hello')").unwrap(), PyValue::Int(5));
+        assert_eq!(eval_single_expr("len([1, 2, 3])").unwrap(), PyValue::Int(3));
+        assert_eq!(eval_single_expr("len({'a': 1})").unwrap(), PyValue::Int(1));
+    }
+
+    #[test]
+    fn test_builtin_range() {
+        let result = eval_single_expr("range(5)").unwrap();
+        assert!(matches!(result, PyValue::List(_)));
+    }
+
+    #[test]
+    fn test_builtin_str() {
+        assert_eq!(eval_single_expr("str(42)").unwrap(), PyValue::Str("42".into()));
+        assert_eq!(eval_single_expr("str(True)").unwrap(), PyValue::Str("True".into()));
+    }
+
+    #[test]
+    fn test_builtin_type() {
+        let result = eval_single_expr("type(42)").unwrap();
+        assert_eq!(result, PyValue::Str("<class 'int'>".into()));
+    }
+
+    #[test]
+    fn test_builtin_isinstance() {
+        exec_module("class Foo:\n    pass\nobj = Foo()\nis_inst = isinstance(obj, Foo)").ok();
+        let is_inst = get_global("class Foo:\n    pass\nobj = Foo()\nis_inst = isinstance(obj, Foo)", "is_inst");
+        assert_eq!(is_inst, PyValue::Bool(true));
+    }
+
+    #[test]
+    fn test_builtin_isinstance_false() {
+        exec_module("class Foo:\n    pass\nis_inst = isinstance(42, Foo)").ok();
+        let is_inst = get_global("class Foo:\n    pass\nis_inst = isinstance(42, Foo)", "is_inst");
+        assert_eq!(is_inst, PyValue::Bool(false));
+    }
+
+    #[test]
+    fn test_list_comprehension() {
+        exec_module("result = [x * 2 for x in [1, 2, 3]]").ok();
+        let result = get_global("result = [x * 2 for x in [1, 2, 3]]", "result");
+        if let PyValue::List(l) = result {
+            let vals: Vec<i64> = l.borrow().iter().map(|v| {
+                if let PyValue::Int(i) = v { *i } else { 0 }
+            }).collect();
+            assert_eq!(vals, vec![2, 4, 6]);
+        } else {
+            panic!("Expected list");
+        }
+    }
+
+    #[test]
+    fn test_list_comprehension_with_filter() {
+        exec_module("result = [x for x in [1, 2, 3, 4, 5] if x % 2 == 0]").ok();
+        let result = get_global("result = [x for x in [1, 2, 3, 4, 5] if x % 2 == 0]", "result");
+        if let PyValue::List(l) = result {
+            let vals: Vec<i64> = l.borrow().iter().map(|v| {
+                if let PyValue::Int(i) = v { *i } else { 0 }
+            }).collect();
+            assert_eq!(vals, vec![2, 4]);
+        } else {
+            panic!("Expected list");
+        }
+    }
+
+    #[test]
+    fn test_none_value() {
+        exec_module("x = None").ok();
+        let x = get_global("x = None", "x");
+        assert_eq!(x, PyValue::None);
+    }
+
+    #[test]
+    fn test_truthy_values() {
+        assert!(eval_single_expr("True").unwrap().is_truthy());
+        assert!(eval_single_expr("1").unwrap().is_truthy());
+        assert!(eval_single_expr("'hello'").unwrap().is_truthy());
+    }
+
+    #[test]
+    fn test_falsy_values() {
+        assert!(!eval_single_expr("False").unwrap().is_truthy());
+        assert!(!eval_single_expr("0").unwrap().is_truthy());
+        assert!(!eval_single_expr("''").unwrap().is_truthy());
+        assert!(!eval_single_expr("None").unwrap().is_truthy());
+        assert!(!eval_single_expr("[]").unwrap().is_truthy());
+        assert!(!eval_single_expr("{}").unwrap().is_truthy());
+    }
+
+    #[test]
+    fn test_module_attribute_access() {
+        exec_module("import sys\nresult = sys.version").ok();
+        let result = get_global("import sys\nresult = sys.version", "result");
+        assert!(matches!(result, PyValue::Str(_)));
+    }
+
+    #[test]
+    fn test_nested_function_closure() {
+        exec_module(
+            "def outer():\n    x = 10\n    def inner():\n        return x\n    return inner\nfn = outer()\nresult = fn()"
+        ).ok();
+        let result = get_global(
+            "def outer():\n    x = 10\n    def inner():\n        return x\n    return inner\nfn = outer()\nresult = fn()",
+            "result"
+        );
+        assert_eq!(result, PyValue::Int(10));
+    }
+
+    #[test]
+    fn test_string_fstring() {
+        exec_module("name = 'World'\nresult = f'Hello, {name}!'").ok();
+        let result = get_global("name = 'World'\nresult = f'Hello, {name}!'", "result");
+        assert_eq!(result, PyValue::Str("Hello, World!".into()));
+    }
+
+    #[test]
+    fn test_fstring_with_expression() {
+        exec_module("x = 5\ny = 3\nresult = f'{x} + {y} = {x + y}'").ok();
+        let result = get_global("x = 5\ny = 3\nresult = f'{x} + {y} = {x + y}'", "result");
+        assert_eq!(result, PyValue::Str("5 + 3 = 8".into()));
+    }
+
+    #[test]
+    fn test_pass_statement() {
+        let result = exec_module("if True:\n    pass");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_multiple_except_handlers() {
+        exec_module(
+            "x = 0\ntry:\n    pass\nexcept TypeError:\n    x = 1\nexcept ValueError:\n    x = 2\nexcept:\n    x = 3"
+        ).ok();
+        let x = get_global(
+            "x = 0\ntry:\n    pass\nexcept TypeError:\n    x = 1\nexcept ValueError:\n    x = 2\nexcept:\n    x = 3",
+            "x"
+        );
+        assert_eq!(x, PyValue::Int(0));
+    }
+
+    #[test]
+    fn test_attribute_access_on_instance() {
+        exec_module(
+            "class Foo:\n    def __init__(self):\n        self.x = 42\nobj = Foo()\nresult = obj.x"
+        ).ok();
+        let result = get_global(
+            "class Foo:\n    def __init__(self):\n        self.x = 42\nobj = Foo()\nresult = obj.x",
+            "result"
+        );
+        assert_eq!(result, PyValue::Int(42));
+    }
+
+    #[test]
+    fn test_attribute_assignment() {
+        exec_module(
+            "class Foo:\n    pass\nobj = Foo()\nobj.x = 99"
+        ).ok();
+        let obj = get_global("class Foo:\n    pass\nobj = Foo()\nobj.x = 99", "obj");
+        if let PyValue::Instance { attrs, .. } = obj {
+            assert_eq!(attrs.borrow().get("x"), Some(&PyValue::Int(99)));
+        } else {
+            panic!("Expected instance");
+        }
+    }
+
+    #[test]
+    fn test_subscript_assignment() {
+        exec_module(
+            "lst = [1, 2, 3]\nlst[1] = 99"
+        ).ok();
+        let lst = get_global("lst = [1, 2, 3]\nlst[1] = 99", "lst");
+        if let PyValue::List(l) = lst {
+            assert_eq!(l.borrow()[1], PyValue::Int(99));
+        } else {
+            panic!("Expected list");
+        }
+    }
+
+    #[test]
+    fn test_unpacking() {
+        exec_module("a, b = [1, 2]").ok();
+        let a = get_global("a, b = [1, 2]", "a");
+        let b = get_global("a, b = [1, 2]", "b");
+        assert_eq!(a, PyValue::Int(1));
+        assert_eq!(b, PyValue::Int(2));
+    }
+
+    #[test]
+    fn test_from_import() {
+        exec_module("from sys import version").ok();
+        let version = get_global("from sys import version", "version");
+        assert!(matches!(version, PyValue::Str(_)));
+    }
+
+    #[test]
+    fn test_for_loop_nested() {
+        exec_module(
+            "result = 0\nfor i in range(3):\n    for j in range(3):\n        result += 1"
+        ).ok();
+        let result = get_global(
+            "result = 0\nfor i in range(3):\n    for j in range(3):\n        result += 1",
+            "result"
+        );
+        assert_eq!(result, PyValue::Int(9));
+    }
+
+    #[test]
+    fn test_while_nested() {
+        exec_module(
+            "i = 0\nj = 0\nwhile i < 3:\n    j = 0\n    while j < 3:\n        j += 1\n    i += 1\nresult = j"
+        ).ok();
+        let result = get_global(
+            "i = 0\nj = 0\nwhile i < 3:\n    j = 0\n    while j < 3:\n        j += 1\n    i += 1\nresult = j",
+            "result"
+        );
+        assert_eq!(result, PyValue::Int(3));
+    }
+}

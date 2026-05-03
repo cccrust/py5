@@ -424,3 +424,231 @@ if is_triple {
     });
     Ok(tokens)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn check_token_kinds(source: &str, expected: &[TokenKind]) {
+        let tokens = lex_source(source).unwrap();
+        let actual: Vec<TokenKind> = tokens.iter().map(|t| t.kind.clone()).collect();
+        let without_eof: Vec<TokenKind> = actual.iter()
+            .filter(|k| !matches!(k, TokenKind::Eof))
+            .cloned()
+            .collect();
+        for (i, ek) in expected.iter().enumerate() {
+            assert!(
+                without_eof.iter().any(|k| core::mem::discriminant(k) == core::mem::discriminant(ek)),
+                "Expected {:?} not found in tokens (at index {}): {:?}",
+                ek, i, without_eof
+            );
+        }
+    }
+
+    fn check_token_at(source: &str, pos: usize, expected: &TokenKind) {
+        let tokens = lex_source(source).unwrap();
+        let filtered: Vec<&TokenKind> = tokens.iter()
+            .filter(|t| !matches!(t.kind, TokenKind::Newline | TokenKind::Indent | TokenKind::Dedent))
+            .map(|t| &t.kind)
+            .collect();
+        assert!(
+            pos < filtered.len(),
+            "Position {} out of range (len {})",
+            pos,
+            filtered.len()
+        );
+        assert_eq!(
+            filtered[pos], expected,
+            "Token at position {}: expected {:?}, got {:?}",
+            pos, expected, filtered[pos]
+        );
+    }
+
+    #[test]
+    fn test_keywords() {
+        let src = "def class if elif else while for in return break continue pass try except raise as and or not None True False lambda import from";
+        check_token_kinds(src, &[
+            TokenKind::Def,
+            TokenKind::Class,
+            TokenKind::If,
+            TokenKind::Elif,
+            TokenKind::Else,
+            TokenKind::While,
+            TokenKind::For,
+            TokenKind::In,
+            TokenKind::Return,
+            TokenKind::Break,
+            TokenKind::Continue,
+            TokenKind::Pass,
+            TokenKind::Try,
+            TokenKind::Except,
+            TokenKind::Raise,
+            TokenKind::As,
+            TokenKind::And,
+            TokenKind::Or,
+            TokenKind::Not,
+            TokenKind::NoneVal,
+            TokenKind::TrueVal,
+            TokenKind::FalseVal,
+            TokenKind::Lambda,
+            TokenKind::Import,
+            TokenKind::From,
+        ]);
+    }
+
+    #[test]
+    fn test_numbers() {
+        let src = "42 -17 3.14 -2.5";
+        let tokens = lex_source(src).unwrap();
+        check_token_at(src, 0, &TokenKind::Int(42));
+        check_token_at(src, 1, &TokenKind::Minus);
+        check_token_at(src, 2, &TokenKind::Int(17));
+        check_token_at(src, 3, &TokenKind::Float(3.14));
+    }
+
+    #[test]
+    fn test_string() {
+        let src = "'hello'";
+        let tokens = lex_source(src).unwrap();
+        check_token_at(src, 0, &TokenKind::String("hello".into()));
+    }
+
+    #[test]
+    fn test_escape_sequences() {
+        let src = "'line\\nhere'";
+        let tokens = lex_source(src).unwrap();
+        check_token_at(src, 0, &TokenKind::String("line\nhere".into()));
+    }
+
+    #[test]
+    fn test_fstring() {
+        let src = "f'hello {name}'";
+        let tokens = lex_source(src).unwrap();
+        check_token_at(src, 0, &TokenKind::FString("hello {name}".into()));
+    }
+
+    #[test]
+    fn test_operators() {
+        let src = "+ - * / % = == != < > <= >=";
+        let tokens = lex_source(src).unwrap();
+        check_token_at(src, 0, &TokenKind::Plus);
+        check_token_at(src, 1, &TokenKind::Minus);
+        check_token_at(src, 2, &TokenKind::Star);
+        check_token_at(src, 3, &TokenKind::Slash);
+        check_token_at(src, 4, &TokenKind::Percent);
+        check_token_at(src, 5, &TokenKind::Equal);
+        check_token_at(src, 6, &TokenKind::Eqeq);
+        check_token_at(src, 7, &TokenKind::Ne);
+        check_token_at(src, 8, &TokenKind::Lt);
+        check_token_at(src, 9, &TokenKind::Gt);
+        check_token_at(src, 10, &TokenKind::Le);
+        check_token_at(src, 11, &TokenKind::Ge);
+    }
+
+    #[test]
+    fn test_delimiters() {
+        let src = "( ) [ ] { } , : .";
+        check_token_at(src, 0, &TokenKind::Lparen);
+        check_token_at(src, 1, &TokenKind::Rparen);
+        check_token_at(src, 2, &TokenKind::Lbracket);
+        check_token_at(src, 3, &TokenKind::Rbracket);
+        check_token_at(src, 4, &TokenKind::Lbrace);
+        check_token_at(src, 5, &TokenKind::Rbrace);
+        check_token_at(src, 6, &TokenKind::Comma);
+        check_token_at(src, 7, &TokenKind::Colon);
+        check_token_at(src, 8, &TokenKind::Dot);
+    }
+
+    #[test]
+    fn test_names() {
+        let src = "x foo bar123 _private";
+        check_token_at(src, 0, &TokenKind::Name("x".into()));
+        check_token_at(src, 1, &TokenKind::Name("foo".into()));
+        check_token_at(src, 2, &TokenKind::Name("bar123".into()));
+        check_token_at(src, 3, &TokenKind::Name("_private".into()));
+    }
+
+    #[test]
+    fn test_simple_assignment() {
+        let src = "x = 5";
+        check_token_at(src, 0, &TokenKind::Name("x".into()));
+        check_token_at(src, 1, &TokenKind::Equal);
+        check_token_at(src, 2, &TokenKind::Int(5));
+    }
+
+    #[test]
+    fn test_arrow() {
+        let src = "def foo() -> int:\n    pass";
+        let tokens = lex_source(src).unwrap();
+        assert!(tokens.iter().any(|t| matches!(t.kind, TokenKind::Rarrow)));
+    }
+
+    #[test]
+    fn test_indentation_block() {
+        let src = "if True:\n    x = 1\n    y = 2";
+        let tokens = lex_source(src).unwrap();
+        let has_indent = tokens.iter().any(|t| matches!(t.kind, TokenKind::Indent));
+        let has_dedent = tokens.iter().any(|t| matches!(t.kind, TokenKind::Dedent));
+        assert!(has_indent, "Should have Indent token");
+        assert!(has_dedent, "Should have Dedent token");
+    }
+
+    #[test]
+    fn test_empty_line_no_indent() {
+        let src = "x = 1\n\ny = 2";
+        let tokens = lex_source(src).unwrap();
+        let filtered: Vec<_> = tokens.iter()
+            .filter(|t| !matches!(t.kind, TokenKind::Newline | TokenKind::Indent | TokenKind::Dedent))
+            .collect();
+        assert!(filtered.len() >= 4, "Should have at least 4 meaningful tokens, got {}", filtered.len());
+    }
+
+    #[test]
+    fn test_comment() {
+        let src = "x = 5";
+        check_token_at(src, 0, &TokenKind::Name("x".into()));
+        check_token_at(src, 1, &TokenKind::Equal);
+        check_token_at(src, 2, &TokenKind::Int(5));
+    }
+
+    #[test]
+    fn test_invalid_character() {
+        let result = lex_source("@");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_complex_expression() {
+        let src = "x + y * z - 10 / 2";
+        check_token_at(src, 0, &TokenKind::Name("x".into()));
+        check_token_at(src, 1, &TokenKind::Plus);
+        check_token_at(src, 2, &TokenKind::Name("y".into()));
+        check_token_at(src, 3, &TokenKind::Star);
+        check_token_at(src, 4, &TokenKind::Name("z".into()));
+        check_token_at(src, 5, &TokenKind::Minus);
+        check_token_at(src, 6, &TokenKind::Int(10));
+        check_token_at(src, 7, &TokenKind::Slash);
+        check_token_at(src, 8, &TokenKind::Int(2));
+    }
+
+    #[test]
+    fn test_unterminated_string() {
+        let result = lex_source("'unterminated");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_triple_quote() {
+        let source = r#"x = """hello
+world
+"""
+print(x)"#;
+        match lex_source(source) {
+            Ok(tokens) => {
+                let has_string = tokens.iter().any(|t| matches!(t.kind, TokenKind::String(_)));
+                assert!(has_string, "Should contain a string token");
+            }
+            Err(e) => panic!("Unexpected error: {}", e),
+        }
+    }
+}

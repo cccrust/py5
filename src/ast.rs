@@ -20,7 +20,7 @@ pub(crate) enum LogicOp {
     Or,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Expr {
     NoneVal,
     Bool(bool),
@@ -43,7 +43,7 @@ pub(crate) enum Expr {
     Subscript(Box<Expr>, Box<Expr>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Stmt {
     Expr(Expr),
     Assign(Expr, Expr),

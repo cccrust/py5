@@ -209,6 +209,12 @@ fn load_sys() -> PyValue {
             }),
         ),
     );
+
+    env.borrow_mut().set(
+        "version",
+        PyValue::Str("3.11.0 (py5 implementation)".to_string()),
+    );
+
     PyValue::Module("sys".into(), env)
 }
 

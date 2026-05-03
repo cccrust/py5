@@ -1,9 +1,9 @@
-mod ast;
-mod eval;
-mod lexer;
-mod natives;
-mod parser;
-mod value;
+pub mod ast;
+pub mod eval;
+pub mod lexer;
+pub mod natives;
+pub mod parser;
+pub mod value;
 
 use std::collections::HashMap;
 use std::env;
