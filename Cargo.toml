@@ -1,6 +1,6 @@
 [package]
 name = "py5"
-version = "1.2.2"
+version = "1.2.3"
 edition = "2021"
 description = "A minimalist Python interpreter written in Rust."
 license = "MIT"
